@@ -1,0 +1,39 @@
+// This is your Prisma schema file
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  siteId      String
+  type        String
+  properties  String   // JSON string of properties
+  timestamp   DateTime @default(now())
+  ip          String?  // Hashed IP address
+  userAgent   String?  // Hashed user agent
+  sessionId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([siteId, type])
+  @@index([timestamp])
+}
+
+model Site {
+  id          String   @id @default(uuid())
+  siteId      String   @unique
+  name        String
+  domain      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  settings    String   // JSON string of site settings
+  apiKey      String   @unique // Encrypted API key
+  retentionDays Int    @default(30)
+
+  @@index([siteId])
+}

@@ -1,0 +1,19 @@
+{
+  "name": "simplitics",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev:frontend": "bun --cwd frontend run dev",
+    "dev:backend": "bun --cwd backend run dev",
+    "build:frontend": "bun --cwd frontend run build",
+    "build:backend": "bun --cwd backend run build",
+    "test": "bun --cwd frontend test && bun --cwd backend test",
+    "lint": "bun --cwd frontend run lint"
+  },
+  "author": "",
+  "license": "MIT"
+}
