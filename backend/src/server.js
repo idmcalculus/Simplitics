@@ -3,22 +3,19 @@ import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { DatabaseService } from './services/database';
 import { CleanupService } from './services/cleanup';
-import { sanitizeInput, sanitizeUrl } from './utils/sanitization';
-import { hash } from './utils/encryption';
 import { addSecurityHeaders, validateOrigin, rateLimit, validatePayloadSize } from './middleware/security';
+import { hash } from './utils/encryption';
 
 // Initialize services
 const db = new DatabaseService();
 const cleanup = new CleanupService();
-
-// Start cleanup service
 cleanup.start();
 
 const app = new Elysia()
+  // Handle errors with custom responses
   .onError(({ code, error, request }) => {
     console.error(`Error ${code} for ${request.method} ${request.url}:`, error);
-    
-    // Return appropriate status codes based on error type
+
     if (error.message === 'Origin not allowed') {
       return new Response(JSON.stringify({ error: 'Origin not allowed' }), { status: 403 });
     }
@@ -28,40 +25,62 @@ const app = new Elysia()
     if (error.message === 'Payload too large') {
       return new Response(JSON.stringify({ error: 'Payload too large' }), { status: 413 });
     }
+    if (error.message === 'Site ID is required') {
+      return new Response(JSON.stringify({ error: 'Site ID is required' }), { status: 400 });
+    }
     if (error.message.includes('not found')) {
       return new Response(JSON.stringify({ error: error.message }), { status: 404 });
     }
     if (error.message.includes('already exists')) {
       return new Response(JSON.stringify({ error: error.message }), { status: 409 });
     }
-    
+
+    // Fallback
     return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 });
   })
-  // Initialize store and add security middleware
-  .derive(() => ({ headers: {} }))
-  .onRequest((request, store) => {
-    addSecurityHeaders(request, store);
-    validateOrigin(request, store);
-    rateLimit(request, store);
-  })
-  .onBeforeHandle(async ({ request }) => {
-    await validatePayloadSize(request);
-  })
-  .use(cors())
-  .use(swagger({
-    path: '/docs',
-    documentation: {
-      info: {
-        title: 'Simplitics API',
-        version: '0.1.0',
-        description: 'Privacy-first analytics API'
-      }
-    }
+
+  // State store for rate-limiting
+  .state('rateLimitStore', new Map())
+
+  // Derive a "rateLimit" alias and a "headers" object for the route context
+  .derive(({ headers, store }) => ({
+    headers: headers || {},
+    rateLimit: store.rateLimitStore
   }))
+
+  // Global onRequest hook, now using (ctx) instead of (request, store)
+  .onRequest((ctx) => {
+    addSecurityHeaders(ctx);
+    validateOrigin(ctx);
+    rateLimit(ctx);
+  })
+
+  // Validate payload size before route handling
+  .onBeforeHandle(async (ctx) => {
+    await validatePayloadSize(ctx);
+  })
+
+  // Add your plugins
+  .use(cors())
+  .use(
+    swagger({
+      path: '/docs',
+      documentation: {
+        info: {
+          title: 'Simplitics API',
+          version: '0.1.0',
+          description: 'Privacy-first analytics API'
+        }
+      }
+    })
+  )
+
+  // Simple root endpoint
   .get('/', () => 'Simplitics API')
 
   // Register a new site
-  .post('/sites', async ({ body }) => {
+  .post('/sites', async (ctx) => {
+    const { body } = ctx;
     const site = await db.registerSite({
       siteId: body.siteId,
       name: body.name,
@@ -69,12 +88,13 @@ const app = new Elysia()
       settings: body.settings,
       retentionDays: body.retentionDays
     });
-
     return { success: true, site };
   })
 
   // Track events
-  .post('/events', async ({ body, request }) => {
+  .post('/events', async (ctx) => {
+    const { request, body } = ctx;
+
     // Validate site ID header
     const siteId = request.headers.get('X-Site-ID');
     if (!siteId) {
@@ -82,8 +102,7 @@ const app = new Elysia()
     }
 
     // Hash sensitive data
-    const ip = request.headers.get('X-Forwarded-For') || 
-               request.headers.get('X-Real-IP');
+    const ip = request.headers.get('X-Forwarded-For') || request.headers.get('X-Real-IP');
     const userAgent = request.headers.get('User-Agent');
 
     const event = await db.storeEvent({
@@ -100,27 +119,29 @@ const app = new Elysia()
   })
 
   // Get insights
-  .get('/insights/:siteId', async ({ params, query }) => {
+  .get('/insights/:siteId', async (ctx) => {
+    const { params, query } = ctx;
     const insights = await db.getInsights(params.siteId, {
       startDate: query.startDate,
       endDate: query.endDate,
       eventTypes: query.eventTypes?.split(',')
     });
-
     return insights;
   })
 
   // Delete events for GDPR compliance
-  .delete('/events/:siteId', async ({ params, query }) => {
+  .delete('/events/:siteId', async (ctx) => {
+    const { params, query } = ctx;
     const { userId, sessionId } = query;
+
     if (!userId && !sessionId) {
       throw new Error('Either userId or sessionId is required');
     }
 
     const where = {
       siteId: params.siteId,
-      ...(userId && { 'properties.userId': await hash(userId) }),
-      ...(sessionId && { sessionId: await hash(sessionId) })
+      ...(userId && { properties: { contains: userId } }),
+      ...(sessionId && { properties: { contains: sessionId } })
     };
 
     await db.prisma.event.deleteMany({ where });
@@ -128,7 +149,8 @@ const app = new Elysia()
   })
 
   // Get site settings
-  .get('/sites/:siteId', async ({ params }) => {
+  .get('/sites/:siteId', async (ctx) => {
+    const { params } = ctx;
     const site = await db.prisma.site.findUnique({
       where: { siteId: params.siteId },
       select: {
@@ -145,12 +167,12 @@ const app = new Elysia()
     if (!site) {
       throw new Error('Site not found');
     }
-
     return site;
   })
 
   // Update site settings
-  .patch('/sites/:siteId', async ({ params, body }) => {
+  .patch('/sites/:siteId', async (ctx) => {
+    const { params, body } = ctx;
     const site = await db.prisma.site.update({
       where: { siteId: params.siteId },
       data: {
@@ -160,17 +182,14 @@ const app = new Elysia()
         retentionDays: body.retentionDays
       }
     });
-
     return { success: true, site };
   })
   .compile();
 
-// Only start the server if not in test mode
+// Only start server if not in test mode
 if (process.env.NODE_ENV !== 'test') {
   app.listen(3000);
-  console.log(
-    `🚀 Simplitics API is running at ${app.server?.hostname}:${app.server?.port}`
-  );
+  console.log(`🚀 Simplitics API is running at ${app.server?.hostname}:${app.server?.port}`);
 }
 
 export { app };
