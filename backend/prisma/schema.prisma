@@ -1,6 +1,6 @@
 // This is your Prisma schema file
 datasource db {
-  provider = "sqlite"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -9,7 +9,7 @@ generator client {
 }
 
 model Event {
-  id          String   @id @default(uuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   siteId      String
   type        String
   properties  String   // JSON string of properties
@@ -25,7 +25,7 @@ model Event {
 }
 
 model Site {
-  id          String   @id @default(uuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   siteId      String   @unique
   name        String
   domain      String?
@@ -34,6 +34,4 @@ model Site {
   settings    String   // JSON string of site settings
   apiKey      String   @unique // Encrypted API key
   retentionDays Int    @default(30)
-
-  @@index([siteId])
 }

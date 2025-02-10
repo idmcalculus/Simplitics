@@ -5,9 +5,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default {
-  entry: './frontend/src/simplitics.js',
+  entry: './src/index.js',
   output: {
-    path: path.resolve(__dirname, 'frontend/dist'),
+    path: path.resolve(__dirname, 'dist'),
     filename: 'simplitics.js',
     library: 'Simplitics',
     libraryTarget: 'umd',
